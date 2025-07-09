@@ -2,6 +2,7 @@ import subprocess
 import random
 import os
 import glob
+from PIL import Image
 
 # Получение длительности видео (в секундах)
 def get_video_duration(filename):
@@ -203,12 +204,25 @@ def create_static_webp_from_animated(folder_path='.'):
             continue
         
         try:
-            # Извлекаем первый кадр из анимированного WebP
+            # Сначала извлекаем первый кадр в PNG, затем конвертируем обратно в WebP
+            temp_png = f"{file_name}_temp.png"
+            
+            # Извлекаем первый кадр как PNG
             subprocess.run([
-                'ffmpeg', '-i', webp_file, '-vframes', '1', '-c:v', 'libwebp',
+                'ffmpeg', '-i', webp_file, '-vframes', '1', '-f', 'image2',
+                '-y', temp_png
+            ], check=True)
+            
+            # Конвертируем PNG в статический WebP
+            subprocess.run([
+                'ffmpeg', '-i', temp_png, '-c:v', 'libwebp',
                 '-lossless', '1', '-compression_level', '6', '-method', '6',
                 '-y', output_static
             ], check=True)
+            
+            # Удаляем временный PNG файл
+            if os.path.exists(temp_png):
+                os.remove(temp_png)
             
             print(f"✅ Создан статический WebP: {output_static}")
                 
@@ -233,6 +247,157 @@ def create_static_by_categories():
         else:
             print(f"📁 Папка {category} не найдена, пропускаем...")
 
+# Альтернативная функция для создания PNG изображений из WebP анимаций
+def create_static_png_from_webp(folder_path='.'):
+    """
+    Создает статические PNG изображения из анимированных WebP файлов,
+    оставляя только первый кадр
+    
+    Args:
+        folder_path: путь к папке (по умолчанию текущая папка)
+    """
+    # Получаем все WebP файлы
+    webp_pattern = os.path.join(folder_path, '**', '*.webp')
+    webp_files = glob.glob(webp_pattern, recursive=True)
+    
+    if not webp_files:
+        print(f"В папке {folder_path} не найдено WebP файлов")
+        return
+    
+    print(f"Найдено {len(webp_files)} WebP файлов для создания PNG превью:")
+    
+    for i, webp_file in enumerate(webp_files, 1):
+        print(f"\n[{i}/{len(webp_files)}] Обрабатываем: {webp_file}")
+        
+        # Создаем имя выходного файла
+        file_name, file_ext = os.path.splitext(webp_file)
+        output_png = f"{file_name}_static.png"
+        
+        # Проверяем, не существует ли уже файл
+        if os.path.exists(output_png):
+            print(f"Файл {output_png} уже существует, пропускаем...")
+            continue
+            
+        # Проверяем, не является ли файл уже статическим
+        if '_static' in file_name:
+            print(f"Файл {webp_file} уже статический, пропускаем...")
+            continue
+        
+        try:
+            # Извлекаем первый кадр как PNG
+            subprocess.run([
+                'ffmpeg', '-i', webp_file, '-vframes', '1', '-f', 'image2',
+                '-q:v', '1', '-y', output_png
+            ], check=True)
+            
+            print(f"✅ Создан статический PNG: {output_png}")
+                
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Ошибка ffmpeg при обработке {webp_file}: {str(e)}")
+        except Exception as e:
+            print(f"❌ Общая ошибка при обработке {webp_file}: {str(e)}")
+    
+    print(f"\n🎉 Создание PNG превью завершено!")
+
+# Функция для создания статических изображений с помощью PIL
+def create_static_with_pil(folder_path='.'):
+    """
+    Создает статические изображения из анимированных WebP файлов используя PIL
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        print("❌ Ошибка: Установите Pillow командой: pip install Pillow")
+        return
+    
+    # Получаем все WebP файлы
+    webp_pattern = os.path.join(folder_path, '**', '*.webp')
+    webp_files = glob.glob(webp_pattern, recursive=True)
+    
+    if not webp_files:
+        print(f"В папке {folder_path} не найдено WebP файлов")
+        return
+    
+    print(f"Найдено {len(webp_files)} WebP файлов для создания статических версий с PIL:")
+    
+    for i, webp_file in enumerate(webp_files, 1):
+        print(f"\n[{i}/{len(webp_files)}] Обрабатываем: {webp_file}")
+        
+        # Создаем имя выходного файла
+        file_name, file_ext = os.path.splitext(webp_file)
+        
+        # Проверяем, не является ли файл уже статическим
+        if '_static' in file_name:
+            print(f"Файл {webp_file} уже статический, пропускаем...")
+            continue
+        
+        output_webp = f"{file_name}_static.webp"
+        output_png = f"{file_name}_static.png"
+        output_jpg = f"{file_name}_static.jpg"
+        
+        # Проверяем, не существуют ли уже файлы
+        if os.path.exists(output_webp) or os.path.exists(output_png) or os.path.exists(output_jpg):
+            print(f"Статический файл уже существует, пропускаем...")
+            continue
+        
+        try:
+            # Открываем WebP файл
+            with Image.open(webp_file) as img:
+                # Получаем первый кадр
+                first_frame = img.copy()
+                
+                # Сохраняем в трех форматах для максимальной совместимости
+                
+                # WebP (статический)
+                first_frame.save(output_webp, 'WEBP', quality=100, lossless=True)
+                print(f"✅ Создан статический WebP: {output_webp}")
+                
+                # PNG (максимальная совместимость)
+                first_frame.save(output_png, 'PNG', optimize=True)
+                print(f"✅ Создан статический PNG: {output_png}")
+                
+                # JPG (минимальный размер)
+                if first_frame.mode in ('RGBA', 'LA', 'P'):
+                    # Конвертируем в RGB для JPG
+                    rgb_img = Image.new('RGB', first_frame.size, (255, 255, 255))
+                    if first_frame.mode == 'P':
+                        first_frame = first_frame.convert('RGBA')
+                    rgb_img.paste(first_frame, mask=first_frame.split()[-1] if first_frame.mode in ('RGBA', 'LA') else None)
+                    first_frame = rgb_img
+                
+                first_frame.save(output_jpg, 'JPEG', quality=95, optimize=True)
+                print(f"✅ Создан статический JPG: {output_jpg}")
+                
+        except Exception as e:
+            print(f"❌ Ошибка PIL при обработке {webp_file}: {str(e)}")
+            # Если PIL не работает, попробуем простое копирование
+            try:
+                print("Пробуем альтернативный метод...")
+                # Простое копирование первого кадра без ffmpeg
+                with open(webp_file, 'rb') as src:
+                    # Читаем заголовок WebP
+                    data = src.read()
+                    if b'WEBP' in data and b'ANIM' in data:
+                        # Это анимированный WebP, попробуем извлечь первый кадр
+                        # Создаем упрощенную статическую версию
+                        output_copy = f"{file_name}_static_copy.webp"
+                        
+                        # Используем imageio как альтернативу
+                        try:
+                            import imageio
+                            reader = imageio.get_reader(webp_file)
+                            first_frame = reader.get_data(0)
+                            imageio.imwrite(output_png, first_frame)
+                            print(f"✅ Создан PNG через imageio: {output_png}")
+                        except ImportError:
+                            print("❌ Для альтернативного метода установите: pip install imageio[pillow]")
+                        except Exception as e2:
+                            print(f"❌ Альтернативный метод также не сработал: {str(e2)}")
+            except Exception as e2:
+                print(f"❌ Все методы не сработали: {str(e2)}")
+    
+    print(f"\n🎉 Создание статических изображений завершено!")
+
 # Примеры использования:
 
 # 1. Конвертация одного файла (обычная версия):
@@ -250,17 +415,26 @@ def create_static_by_categories():
 # 5. Конвертация по категориям (автоматически ищет папки):
 # convert_videos_by_categories()
 
-# 6. Создание статических изображений из всех WebP в текущей папке:
+# 6. Создание статических WebP изображений из всех WebP в текущей папке:
 # create_static_webp_from_animated('.')
 
-# 7. Создание статических изображений по категориям:
+# 7. Создание статических PNG изображений из всех WebP (если WebP не работает):
+# create_static_png_from_webp('.')
+
+# 8. Создание статических изображений по категориям:
 # create_static_by_categories()
 
 # 8. Конвертация с другими параметрами:
 # convert_all_videos_in_folder('.', use_optimized=True, clip_count=3, total_duration=3)
 
 # 7. Создание статических изображений из анимированных WebP в текущей папке:
-# create_static_webp_from_animated('.')
+# create_static_webp_from_animated('./3d_full_cgi')
 
 # 8. Создание статических изображений по категориям:
-create_static_by_categories()
+# create_static_by_categories()
+
+# 9. Создание статических изображений с помощью PIL (РЕКОМЕНДУЕТСЯ):
+create_static_with_pil('.')
+
+# 10. Создание статических PNG изображений по категориям:
+# create_static_png_from_webp('трансляции')
